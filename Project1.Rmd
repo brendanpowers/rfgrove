@@ -1,0 +1,88 @@
+---
+title: "Repeated cross validated random forest used to predict quality of barbell lifts from acceleromter data."
+author: "Brendan"
+date: "December 8, 2017"
+output: html_document
+---
+
+# Abstract
+
+Quantified self movement data from the [HAR](http://groupware.les.inf.puc-rio.br/har) group is fit to a random forest cross validated model.  The data was collected to quantify how well 6 participants preformed barbell lifts.  The resulting model predicts the outcome with 98% out of sample error.
+
+
+# Exploring the data
+
+The data for this project come from [Human Activity Recognition (HAR)](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har). Both the training and testing data sets contains 160 columns which include the response "**classe**" and 159 potential predictor variables.
+
+```{r file_loading, eval=FALSE, include = FALSE}
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv","pml-training.csv")
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv","pml-testing.csv")
+```
+
+```{r data_loading, cache=TRUE}
+training <- read.csv("pml-training.csv",na.strings = c("NA","#DIV/0!"))
+testing  <- read.csv("pml-testing.csv",na.strings = c("NA","#DIV/0!"))
+data.frame(training_dims = dim(training), testing_dims = dim(testing))
+```
+
+#Fitting and validations strategy
+Next a strategy is needed to determine which variables to include. All variables with more than 50% missing values are excluded from the analysis.  There are seven additional potential predictor variables that are excluded from this analysis below:
+```{r processing, cache=TRUE}
+names(training[,1:7])
+training <- training[,-1:-7]
+testing <- testing[,-1:-7]
+#keep columns with < 50% missing values.
+testing <- testing[,which(colSums(is.na(training))/nrow(training) < .5)]
+training <- training[,which(colSums(is.na(training))/nrow(training) < .5)]
+```
+
+Next, the training dataset is preprocessed using principle component analysis to remove highly correlated predictors.
+```{r, warning=FALSE}
+library(caret)
+pca.train <- preProcess(training[,-ncol(training)], method = "pca")
+trainpc  <- cbind(predict(pca.train,training[,-ncol(training)]),
+                  classe=training$classe)
+```
+
+Then, the model is fit using 10 folds and this is repeated 3 times.  This tunes the model based on the number of variables used and calculates the out of sample error on each fold.  The random forest method is used to fit the data.  This was selected because it is a robust method and fairly light on computation time.
+
+```{r fit, cache = TRUE, warning = FALSE}
+library(caret)
+library(parallel)
+
+control <- trainControl(method="repeatedcv", number=10, repeats=3, search="random")
+set.seed(1214)
+mtry <- 20
+rf_random <- train(classe~., data=trainpc, method="rf", metric="Accuracy", tuneLength=15, trControl=control)
+```
+
+```{r cv_fit,cache=TRUE, warning = FALSE}
+plot(rf_random)
+```
+*Figure 1:* Accuracy vs. # of predictors. 
+
+Peak accuracy occurs at mtry=4.  Accuracy is 98% based on the cross validation of the training set.  This estimate is a good approximation of the out of sample error.  The out of sample error at each fold is displayed next:
+
+```{r oose_fold}
+rf_random$resample
+```
+
+
+#Test Fit
+
+```{r testfit, warning=FALSE}
+
+testPC  <- predict(pca.train,testing[,-ncol(testing)])
+results <- predict(rf_random,testPC)
+data.frame(problem_id=1:20,results=results)
+```
+
+#Conclusions
+The out of sample error is approximately 98%.  This value is valid because the accuracy is always calculated on the fold used from testing during cross validation.
+#References  
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
